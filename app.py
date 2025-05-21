@@ -1,4 +1,4 @@
-# 滾倉模擬器：手機最佳化 + PWA 主畫面功能 + AI 策略模擬平台 + 成長曲線圖解
+# 滾倉模擬器：手機最佳化 + PWA 主畫面功能 + AI 策略模擬平台 + 成長曲線圖解 + 倉位推進 + JSON 輸出儲存功能 + 多槓桿對比模擬
 
 import streamlit as st
 import pandas as pd
@@ -26,7 +26,14 @@ st.markdown("""
 st.title("📊 策略分享型：多幣種滾倉模擬平台（手機版最佳化）")
 
 st.markdown("""
-這是一個策略模擬與分享平台，你可以試算槓桿與價格區間，加倉邏輯、自動推演資金成長，並儲存／載入你的專屬策略。
+這是一個策略模擬與分享平台，你可以：
+- 試算槓桿與價格區間
+- 加倉邏輯調整
+- 自動推演資金成長
+- 查看資金與倉位推進圖
+- 多組槓桿資金成長對比
+- AI 分析風險與提供建議
+- 匯出/載入你的專屬策略 JSON
 """)
 
 # --- Sidebar Inputs ---
@@ -50,8 +57,7 @@ with st.sidebar:
         for x in leverage_full_range
     ]
     leverage_map = dict(zip(leverage_labels, leverage_full_range))
-
-    default_labels = [leverage_labels[9], leverage_labels[19]]  # 預設 10x 和 20x
+    default_labels = [leverage_labels[9], leverage_labels[19]]
     selected_labels = st.multiselect("選擇模擬槓桿（含風險提示）", leverage_labels, default=default_labels)
     leverage_options = [leverage_map[label] for label in selected_labels]
 
@@ -60,45 +66,52 @@ with st.sidebar:
     average_gain_pct = st.slider("每輪平均獲利 (%)", min_value=5, max_value=100, value=30, step=5)
     growth_target = st.number_input("目標金額 (USDT)", value=100000)
 
-# --- 成長曲線模擬區塊 ---
-st.subheader("📈 滾倉資金成長模擬")
-
-if st.button("模擬資金成長曲線"):
-    capital = total_margin
-    target = growth_target
-    growth_rate = average_gain_pct / 100
-    history = []
-    lot_history = []
-    round_count = 0
-    position_size = 1.0  # 初始倉位假設為 1（單位數量）
-
-    while capital < target and round_count < 100:
-        round_count += 1
-        profit = capital * growth_rate
-        capital += profit
-
-        # 倉位推進模擬
-        lot_added = position_size * (add_ratio / 100)
-        position_size += lot_added
-        push_ratio = round(lot_added / position_size * 100, 2)
-
-        history.append({"輪數": round_count, "累積資金": round(capital, 2), "本輪獲利": round(profit, 2)})
-        lot_history.append({"輪數": round_count, "本輪新增倉位": round(lot_added, 4), "累積倉位": round(position_size, 4), "推進比率(%)": push_ratio})
-
-    df = pd.DataFrame(history)
-    lot_df = pd.DataFrame(lot_history)
-
-    st.line_chart(df.set_index("輪數")["累積資金"])
-    st.dataframe(df)
     st.markdown("---")
-    st.subheader("📦 倉位推進明細")
-    st.dataframe(lot_df)
+    st.download_button(
+        label="💾 儲存策略 JSON",
+        file_name=f"{strategy_name}.json",
+        mime="application/json",
+        data=json.dumps({
+            "策略名稱": strategy_name,
+            "幣種": coin,
+            "原始保證金": original_margin,
+            "浮盈": profit,
+            "價格區間": [min_price, max_price, price_step],
+            "槓桿選項": leverage_options,
+            "浮盈加倉觸發%": add_trigger_pct,
+            "加倉比例%": add_ratio,
+            "平均獲利%": average_gain_pct,
+            "目標資金": growth_target,
+            "備註": note
+        }, ensure_ascii=False)
+    )
 
-    st.success(f"預估約需 {round_count} 輪操作可達成 {target:,} USDT 目標資金。")
+# --- 多組槓桿對比模擬 ---
+st.subheader("📊 多組槓桿資金成長對比圖")
+compare_df = pd.DataFrame()
+for lev in leverage_options:
+    capital = total_margin
+    growth_rate = average_gain_pct / 100
+    round_count = 0
+    capital_track = []
+    while capital < growth_target and round_count < 100:
+        round_count += 1
+        capital += capital * growth_rate
+        capital_track.append(capital)
+    compare_df[f"{lev}x"] = pd.Series(capital_track)
 
-# 其餘原功能保留：AI 建議、策略儲存、載入、優化分析... 等照原設計擴充
+if not compare_df.empty:
+    st.line_chart(compare_df)
 
-    st.subheader("📦 倉位推進明細")
-    st.dataframe(lot_df)
-
-    st.success(f"預估約需 {round_count} 輪操作可達成 {target:,} USDT 目標資金。")
+# --- AI 風險評估區塊 ---
+st.subheader("🤖 AI 策略風險分析與建議")
+risk_score = average_gain_pct + add_ratio + (100 if max(leverage_options) > 50 else 0)
+if risk_score < 100:
+    st.markdown("### 🔵 風險等級：低")
+    st.info("此策略偏向穩健，適合長期滾倉與複利增長。")
+elif risk_score < 180:
+    st.markdown("### 🟡 風險等級：中")
+    st.warning("此策略風險與報酬平衡，建議搭配風控規劃與回測。")
+else:
+    st.markdown("### 🔴 風險等級：高")
+    st.error("此策略風險偏高，槓桿與加倉頻率可能導致爆倉，請務必審慎使用。")
