@@ -1,4 +1,3 @@
-
 # 滾倉模擬器：手機最佳化 + PWA 主畫面功能 + AI 策略模擬平台 + 成長曲線圖解
 
 import streamlit as st
@@ -51,7 +50,9 @@ with st.sidebar:
         for x in leverage_full_range
     ]
     leverage_map = dict(zip(leverage_labels, leverage_full_range))
-    selected_labels = st.multiselect("選擇模擬槓桿（含風險提示）", leverage_labels, default=["10x ✅穩健", "20x 🟡中風險"])
+
+    default_labels = [leverage_labels[9], leverage_labels[19]]  # 預設 10x 和 20x
+    selected_labels = st.multiselect("選擇模擬槓桿（含風險提示）", leverage_labels, default=default_labels)
     leverage_options = [leverage_map[label] for label in selected_labels]
 
     add_trigger_pct = st.slider("每浮盈多少%加倉", 5, 100, 20, step=5)
@@ -90,6 +91,13 @@ if st.button("模擬資金成長曲線"):
     st.line_chart(df.set_index("輪數")["累積資金"])
     st.dataframe(df)
     st.markdown("---")
+    st.subheader("📦 倉位推進明細")
+    st.dataframe(lot_df)
+
+    st.success(f"預估約需 {round_count} 輪操作可達成 {target:,} USDT 目標資金。")
+
+# 其餘原功能保留：AI 建議、策略儲存、載入、優化分析... 等照原設計擴充
+
     st.subheader("📦 倉位推進明細")
     st.dataframe(lot_df)
 
