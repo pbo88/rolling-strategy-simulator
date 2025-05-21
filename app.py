@@ -1,4 +1,4 @@
-# 滾倉模擬器：手機最佳化 + PWA 主畫面功能 + AI 策略模擬平台 + 成長曲線圖解 + 倉位推進 + JSON 輸出儲存功能 + 多槓桿對比模擬
+# 滾倉模擬器：手機最佳化 + PWA 主畫面功能 + AI 策略模擬平台 + 成長曲線圖解 + 倉位推進 + JSON 輸出儲存功能 + 多槓桿對比模擬（優化模擬條件）
 
 import streamlit as st
 import pandas as pd
@@ -29,7 +29,7 @@ st.markdown("""
 這是一個策略模擬與分享平台，你可以：
 - 試算槓桿與價格區間
 - 加倉邏輯調整
-- 自動推演資金成長
+- 自動推演資金成長（自動停止條件優化）
 - 查看資金與倉位推進圖
 - 多組槓桿資金成長對比
 - AI 分析風險與提供建議
@@ -86,7 +86,7 @@ with st.sidebar:
         }, ensure_ascii=False)
     )
 
-# --- 多組槓桿對比模擬 ---
+# --- 多組槓桿對比模擬（優化條件：允許模擬超過 100 輪） ---
 st.subheader("📊 多組槓桿資金成長對比圖")
 compare_df = pd.DataFrame()
 for lev in leverage_options:
@@ -94,7 +94,8 @@ for lev in leverage_options:
     growth_rate = average_gain_pct / 100
     round_count = 0
     capital_track = []
-    while capital < growth_target and round_count < 100:
+    max_rounds = 300
+    while capital < growth_target and round_count < max_rounds:
         round_count += 1
         capital += capital * growth_rate
         capital_track.append(capital)
@@ -111,6 +112,11 @@ if risk_score < 100:
     st.info("此策略偏向穩健，適合長期滾倉與複利增長。")
 elif risk_score < 180:
     st.markdown("### 🟡 風險等級：中")
+    st.warning("此策略風險與報酬平衡，建議搭配風控規劃與回測。")
+else:
+    st.markdown("### 🔴 風險等級：高")
+    st.error("此策略風險偏高，槓桿與加倉頻率可能導致爆倉，請務必審慎使用。")
+
     st.warning("此策略風險與報酬平衡，建議搭配風控規劃與回測。")
 else:
     st.markdown("### 🔴 風險等級：高")
