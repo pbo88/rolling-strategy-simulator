@@ -94,3 +94,4 @@ if st.button("模擬資金成長曲線"):
     st.success(f"預估約需 {round_count} 輪操作可達成 {target:,} USDT 目標資金。")
 
 # 其餘原功能保留：AI 建議、策略儲存、載入、優化分析... 等照原設計擴充
+Update app.py: 新增手機優化 + AI 模組 + 成長曲線模擬
