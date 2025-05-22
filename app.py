@@ -1,4 +1,4 @@
-# 滾倉模擬器互動版（多幣種 + 幣/U 本位選擇 + 降槓桿風控 + JSON 儲存 + 圖表模擬 + 強平價格計算 + 每輪加倉明細表）
+# 滾倉模擬器互動版（多幣種 + 幣/U 本位選擇 + 降槓桿風控 + JSON 儲存 + 圖表模擬 + 強平價格計算 + 每輪加倉明細表 + 滾倉 vs 浮盈加倉對比）
 
 import streamlit as st
 import pandas as pd
@@ -11,18 +11,18 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("📉 多幣種滾倉模擬平台 + 降槓桿風控 + 強平價格預估")
+st.title("📉 多幣種滾倉模擬平台 + 降槓桿風控 + 強平價格預估 + 策略對比")
 
 with st.sidebar:
     st.header("參數設定")
     coin = st.selectbox("幣種", ["BTC", "ETH", "SOL", "TON", "PROMP"])
     margin_mode = st.radio("保證金模式", ["U 本位", "幣本位"])
     strategy_name = st.text_input("策略名稱", value="風控降槓桿策略")
-    note = st.text_area("備註", value="模擬從起始價格到目標價格，加倉並隨浮盈降槓桿")
+    note = st.text_area("備註", value="比較浮盈加倉 vs 每段平倉滾倉模式")
 
     start_price = st.number_input("起始價格", value=106000.0)
     target_price = st.number_input("目標價格", value=150000.0)
-    initial_margin = st.number_input("初始保證金", value=100.0)
+    initial_margin = st.number_input("初始保證金", value=100.0, min_value=0.00001, format="%.5f")
     leverage = st.slider("初始槓桿", 1, 100, 10)
     gain_trigger_pct = st.slider("浮盈加倉觸發 %", 5, 100, 15) / 100
     add_ratio = st.slider("每次加倉比例 %", 10, 100, 80) / 100
@@ -37,116 +37,89 @@ leverage_drop_points = {
     10: 1
 }
 
-capital = initial_margin
-price = start_price
-max_price = start_price
-add_count = 0
-reserve_profit = 0
-current_leverage = leverage
+def simulate(strategy_type):
+    capital = initial_margin
+    price = start_price
+    max_price = start_price
+    reserve_profit = 0
+    current_leverage = leverage
+    position = (capital * current_leverage / price) if margin_mode == "幣本位" else (capital * current_leverage)
+    add_count = 0
 
-# 初始倉位計算
-position = (capital * current_leverage / price) if margin_mode == "幣本位" else (capital * current_leverage)
+    price_track, capital_track, position_track = [price], [capital], [position]
+    reserve_track, leverage_track, liquidation_track = [0], [current_leverage], [price - price / leverage]
+    add_table = []
 
-# 數據記錄用
-price_track = [price]
-capital_track = [capital]
-position_track = [position]
-reserve_track = [reserve_profit]
-leverage_track = [current_leverage]
-liquidation_track = [price - price / leverage]
-add_table = []
+    while price < target_price:
+        price *= (1 + step_price_pct)
+        max_price = max(price, max_price)
+        if price < max_price * (1 - stoploss_drawdown): break
 
-while price < target_price:
-    price *= (1 + step_price_pct)
-    max_price = max(price, max_price)
+        for threshold, new_lev in sorted(leverage_drop_points.items()):
+            if capital >= initial_margin * threshold and current_leverage > new_lev:
+                current_leverage = new_lev
+                position = (capital * current_leverage / price) if margin_mode == "幣本位" else (capital * current_leverage)
 
-    if price < max_price * (1 - stoploss_drawdown):
-        break
+        entry_price = price
+        profit_per_unit = step_price_pct * (price if margin_mode == "幣本位" else 1)
+        unrealized_profit = position * profit_per_unit
 
-    for threshold, new_lev in sorted(leverage_drop_points.items()):
-        if capital >= initial_margin * threshold and current_leverage > new_lev:
-            current_leverage = new_lev
+        if unrealized_profit / capital >= gain_trigger_pct:
+            new_profit = capital * gain_trigger_pct
+            add_amount = new_profit * add_ratio
+            reserve_amount = new_profit * reserve_ratio
+
+            capital += add_amount
+            reserve_profit += reserve_amount
+
+            if strategy_type == "滾倉":
+                capital = initial_margin + reserve_profit
+
             position = (capital * current_leverage / price) if margin_mode == "幣本位" else (capital * current_leverage)
+            add_count += 1
+            add_table.append({"價格": round(entry_price, 2), "資金總額": round(capital, 2), "槓桿倉位": round(position, 2)})
 
-    entry_price = price
-    prev_capital = capital
+        price_track.append(price)
+        capital_track.append(capital)
+        position_track.append(position)
+        reserve_track.append(reserve_profit)
+        leverage_track.append(current_leverage)
+        liquidation_track.append(price - price / current_leverage)
 
-    unrealized_profit = position * step_price_pct * (price if margin_mode == "幣本位" else 1)
+    change_pct = (price - start_price) / start_price
+    floating_profit = position * change_pct * (price if margin_mode == "幣本位" else 1)
+    final_profit = round(floating_profit + reserve_profit, 2)
 
-    if unrealized_profit / capital >= gain_trigger_pct:
-        new_profit = capital * gain_trigger_pct
-        add_amount = new_profit * add_ratio
-        reserve_amount = new_profit * reserve_ratio
-
-        capital += add_amount
-        reserve_profit += reserve_amount
-        position = (capital * current_leverage / price) if margin_mode == "幣本位" else (capital * current_leverage)
-        add_count += 1
-
-        add_table.append({
-            "價格": round(entry_price, 2),
-            "資金總額": round(capital, 2),
-            "槓桿倉位": round(position, 2),
-        })
-
-    price_track.append(price)
-    capital_track.append(capital)
-    position_track.append(position)
-    reserve_track.append(reserve_profit)
-    leverage_track.append(current_leverage)
-    liquidation_price = price - (price / current_leverage)
-    liquidation_track.append(liquidation_price)
-
-final_price = price
-price_change_pct = (final_price - start_price) / start_price
-floating_profit = position * price_change_pct * (final_price if margin_mode == "幣本位" else 1)
-final_profit = round(floating_profit + reserve_profit, 2)
-
-st.subheader("📈 模擬結果")
-st.metric("加倉次數", add_count)
-st.metric("最終槓桿", current_leverage)
-st.metric("保留收益", f"{reserve_profit:.2f} USDT")
-st.metric("總投入", f"{capital:.2f} USDT")
-st.metric("倉位控制", f"{position:.6f} {'幣' if margin_mode == '幣本位' else 'USDT'}")
-st.metric("含保留最終獲利", f"{final_profit:.2f} USDT")
-st.metric("當前強平價格", f"{liquidation_track[-1]:.2f} USDT")
-
-st.line_chart(pd.DataFrame({
-    "價格": price_track,
-    "資金": capital_track,
-    "倉位": position_track,
-    "保留": reserve_track,
-    "槓桿": leverage_track,
-    "強平價": liquidation_track
-}))
-
-if add_table:
-    st.subheader("📋 浮盈加倉推演明細")
-    st.dataframe(pd.DataFrame(add_table))
-
-st.download_button(
-    label="💾 儲存策略 JSON",
-    file_name=f"{strategy_name}_{coin}.json",
-    mime="application/json",
-    data=json.dumps({
-        "策略名稱": strategy_name,
-        "幣種": coin,
-        "保證金模式": margin_mode,
-        "起始價格": start_price,
-        "目標價格": target_price,
-        "初始保證金": initial_margin,
-        "加倉觸發%": gain_trigger_pct,
-        "加倉比例%": add_ratio,
-        "保留比例%": reserve_ratio,
-        "模擬漲幅步伐": step_price_pct,
-        "槓桿變化": leverage_drop_points,
+    return {
+        "加倉次數": add_count,
         "最終槓桿": current_leverage,
-        "保留獲利": reserve_profit,
+        "保留收益": reserve_profit,
         "總投入": capital,
         "倉位": position,
         "總獲利": final_profit,
-        "最終強平價": liquidation_track[-1],
-        "加倉明細": add_table,
-        "說明": note
-    }, ensure_ascii=False)
-)
+        "強平價": liquidation_track[-1],
+        "圖表": pd.DataFrame({
+            f"價格_{strategy_type}": price_track,
+            f"資金_{strategy_type}": capital_track,
+            f"倉位_{strategy_type}": position_track
+        }),
+        "明細": pd.DataFrame(add_table)
+    }
+
+# 執行模擬
+result_浮盈 = simulate("浮盈")
+result_滾倉 = simulate("滾倉")
+
+st.subheader("📊 策略獲利比較")
+st.metric("浮盈加倉總獲利", f"{result_浮盈['總獲利']:.2f} USDT")
+st.metric("滾倉策略總獲利", f"{result_滾倉['總獲利']:.2f} USDT")
+
+st.subheader("📈 資金變化對比圖")
+chart_df = pd.concat([result_浮盈["圖表"], result_滾倉["圖表"]], axis=1)
+st.line_chart(chart_df)
+
+st.subheader("📋 浮盈加倉推演明細")
+st.dataframe(result_浮盈["明細"])
+
+st.subheader("📋 滾倉策略推演明細")
+st.dataframe(result_滾倉["明細"])
